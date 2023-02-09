@@ -1,0 +1,60 @@
+trigger: none
+pr: none
+
+variables:
+  tag: '$(Build.BuildNumber)'
+  # Yarn Cache Folder
+  YARN_CACHE_FOLDER: $(Pipeline.Workspace)/.yarn
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+  # Workflow package path
+  workflowPkgPath: './services/media/workflows'
+
+stages:
+  - stage: Build
+    displayName: Build and push stage
+    jobs:
+      - job: Build
+        displayName: Build
+        pool:
+          vmImage: 'ubuntu-latest'
+          demands: project_navy
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '14.x'
+            displayName: 'Install Node.js'
+          - task: Cache@2
+            inputs:
+              key: 'yarn | "$(Agent.OS)" | yarn.lock'
+              restoreKeys: |
+                yarn | "$(Agent.OS)"
+                yarn
+              path: $(YARN_CACHE_FOLDER)
+            displayName: Cache Yarn packages
+          - script: |
+              ORIGINAL_PKG_VER=`npx -q json -f "$(workflowPkgPath)/package.json" version`
+              NEW_PKG_VER="${ORIGINAL_PKG_VER}-$(tag)"
+
+              echo "Current package.json version is: [${ORIGINAL_PKG_VER}]"
+              echo "Updating package.json version to: [${NEW_PKG_VER}]"
+
+              npx -q json -I -f "$(workflowPkgPath)/package.json" -e "this.version = '${NEW_PKG_VER}'"
+
+              echo "Updated package.json version is: [`npx -q json -f \"$(workflowPkgPath)/package.json\" version`]"
+            displayName:
+              'Updating package.json version to reflect the build number'
+          - script: |
+              npm run $(packageBuildCommand)
+            displayName: 'Build pilet'
+          - task: CopyFiles@2
+            inputs:
+              Contents: '*.tgz'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)'
+            displayName: Copy pilet package artifact staging directory
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'drop'
+              publishLocation: 'Container'
+            displayName: Publishing build artifact
